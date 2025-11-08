@@ -131,6 +131,15 @@ struct Game {
     player_sub: i32,
     ghost_sub: i32,
     ghost_think_timer: i32,
+    // Optimization: reusable buffers to avoid allocations
+    ghost_opts_buffer: Vec<(i32, i32, i32)>,
+    // Optimization: cached rendering values
+    cached_scale: f32,
+    cached_ox: i32,
+    cached_oy: i32,
+    cached_game_start_y: i32,
+    cached_sw: i32,
+    window_size_changed: bool,
 }
 
 impl Game {
@@ -166,6 +175,13 @@ impl Game {
             player_sub: 0,
             ghost_sub: 0,
             ghost_think_timer: 0,
+            ghost_opts_buffer: Vec::with_capacity(4),
+            cached_scale: 1.0,
+            cached_ox: 0,
+            cached_oy: 0,
+            cached_game_start_y: 0,
+            cached_sw: 0,
+            window_size_changed: true,
         }
     }
 
@@ -174,6 +190,9 @@ impl Game {
     }
 
     fn ghost_think(&mut self) {
+        // Optimization: Reuse buffer instead of allocating new Vecs
+        self.ghost_opts_buffer.clear();
+        
         // If vulnerable, try to run away from player (simple flee AI)
         if self.ram.ghost_vulnerable {
             // Flee: prefer direction away from player
@@ -185,39 +204,44 @@ impl Game {
             let open_w = !is_wall(self.ram.gx - 1, self.ram.gy);
             let open_e = !is_wall(self.ram.gx + 1, self.ram.gy);
 
-            let mut opts: Vec<(i32, i32, i32)> = Vec::with_capacity(4); // (dx, dy, priority)
-            
             if open_n && self.ram.gdy != 1 {
-                let priority = if dy_to_player > 0 { 10 } else { 1 }; // prefer north if player is south
-                opts.push((0, -1, priority));
+                let priority = if dy_to_player > 0 { 10 } else { 1 };
+                self.ghost_opts_buffer.push((0, -1, priority));
             }
             if open_s && self.ram.gdy != -1 {
                 let priority = if dy_to_player < 0 { 10 } else { 1 };
-                opts.push((0, 1, priority));
+                self.ghost_opts_buffer.push((0, 1, priority));
             }
             if open_w && self.ram.gdx != 1 {
                 let priority = if dx_to_player > 0 { 10 } else { 1 };
-                opts.push((-1, 0, priority));
+                self.ghost_opts_buffer.push((-1, 0, priority));
             }
             if open_e && self.ram.gdx != -1 {
                 let priority = if dx_to_player < 0 { 10 } else { 1 };
-                opts.push((1, 0, priority));
+                self.ghost_opts_buffer.push((1, 0, priority));
             }
 
-            if opts.is_empty() {
+            if self.ghost_opts_buffer.is_empty() {
                 self.ram.gdx = -self.ram.gdx;
                 self.ram.gdy = -self.ram.gdy;
                 return;
             }
             
             // Choose direction with highest priority (fleeing), or random if equal
-            opts.sort_by(|a, b| b.2.cmp(&a.2));
-            let best_priority = opts[0].2;
-            let flee_opts: Vec<_> = opts.iter().filter(|o| o.2 == best_priority).collect();
-            let i = self.rng.range(0, flee_opts.len() as i32 - 1) as usize;
-            let (dx, dy, _) = flee_opts[i];
-            self.ram.gdx = *dx;
-            self.ram.gdy = *dy;
+            self.ghost_opts_buffer.sort_by(|a, b| b.2.cmp(&a.2));
+            let best_priority = self.ghost_opts_buffer[0].2;
+            let mut best_count = 0;
+            for opt in &self.ghost_opts_buffer {
+                if opt.2 == best_priority {
+                    best_count += 1;
+                } else {
+                    break;
+                }
+            }
+            let i = self.rng.range(0, best_count - 1) as usize;
+            let (dx, dy, _) = self.ghost_opts_buffer[i];
+            self.ram.gdx = dx;
+            self.ram.gdy = dy;
             return;
         }
         
@@ -227,27 +251,28 @@ impl Game {
         let open_w = !is_wall(self.ram.gx - 1, self.ram.gy);
         let open_e = !is_wall(self.ram.gx + 1, self.ram.gy);
 
-        let mut opts: Vec<(i32, i32)> = Vec::with_capacity(4);
+        // Reuse buffer for normal AI (only need 2-tuples, but buffer has 3-tuples - we'll use first 2)
+        self.ghost_opts_buffer.clear();
         if open_n && self.ram.gdy != 1 {
-            opts.push((0, -1));
+            self.ghost_opts_buffer.push((0, -1, 0));
         }
         if open_s && self.ram.gdy != -1 {
-            opts.push((0, 1));
+            self.ghost_opts_buffer.push((0, 1, 0));
         }
         if open_w && self.ram.gdx != 1 {
-            opts.push((-1, 0));
+            self.ghost_opts_buffer.push((-1, 0, 0));
         }
         if open_e && self.ram.gdx != -1 {
-            opts.push((1, 0));
+            self.ghost_opts_buffer.push((1, 0, 0));
         }
 
-        if opts.is_empty() {
+        if self.ghost_opts_buffer.is_empty() {
             self.ram.gdx = -self.ram.gdx;
             self.ram.gdy = -self.ram.gdy;
             return;
         }
-        let i = self.rng.range(0, opts.len() as i32 - 1) as usize;
-        let (dx, dy) = opts[i];
+        let i = self.rng.range(0, self.ghost_opts_buffer.len() as i32 - 1) as usize;
+        let (dx, dy, _) = self.ghost_opts_buffer[i];
         self.ram.gdx = dx;
         self.ram.gdy = dy;
     }
@@ -255,33 +280,24 @@ impl Game {
     fn tick(&mut self, keyboard: &sdl2::keyboard::KeyboardState) {
         self.ram.frame = self.ram.frame.wrapping_add(1);
 
-        // Get desired direction from input
+        // Optimization: Check input ONCE per frame instead of twice
         let mut wantdx = self.ram.pdx;
         let mut wantdy = self.ram.pdy;
 
         if keyboard.is_scancode_pressed(Scancode::Up) {
             wantdx = 0; wantdy = -1;
-        }
-        if keyboard.is_scancode_pressed(Scancode::Down) {
+        } else if keyboard.is_scancode_pressed(Scancode::Down) {
             wantdx = 0; wantdy = 1;
-        }
-        if keyboard.is_scancode_pressed(Scancode::Left) {
+        } else if keyboard.is_scancode_pressed(Scancode::Left) {
             wantdx = -1; wantdy = 0;
-        }
-        if keyboard.is_scancode_pressed(Scancode::Right) {
+        } else if keyboard.is_scancode_pressed(Scancode::Right) {
             wantdx = 1; wantdy = 0;
         }
 
         // Check if we can change direction
-        // Allow direction change if the next tile in desired direction is not a wall
-        // and we're aligned to the grid (can turn at any grid-aligned position)
         let is_aligned = self.player_sub == 0;
         let can_turn = (wantdx != self.ram.pdx || wantdy != self.ram.pdy) && 
                        !is_wall(self.ram.px + wantdx, self.ram.py + wantdy);
-        
-        // Change direction immediately if:
-        // - We're aligned to grid AND the desired direction is valid, OR
-        // - We can reverse direction (180-degree turn allowed anytime)
         let can_reverse = wantdx == -self.ram.pdx && wantdy == -self.ram.pdy;
         
         if can_turn && (is_aligned || can_reverse) {
@@ -294,28 +310,10 @@ impl Game {
         if self.player_sub >= 4 {
             self.player_sub = 0;
             
-            // Check input again right before moving (for queued direction changes)
-            // This allows pressing a direction key just before reaching a corner
-            let mut final_dx = self.ram.pdx;
-            let mut final_dy = self.ram.pdy;
-            
-            if keyboard.is_scancode_pressed(Scancode::Up) {
-                final_dx = 0; final_dy = -1;
-            }
-            if keyboard.is_scancode_pressed(Scancode::Down) {
-                final_dx = 0; final_dy = 1;
-            }
-            if keyboard.is_scancode_pressed(Scancode::Left) {
-                final_dx = -1; final_dy = 0;
-            }
-            if keyboard.is_scancode_pressed(Scancode::Right) {
-                final_dx = 1; final_dy = 0;
-            }
-            
-            // Apply direction change if valid
-            if !is_wall(self.ram.px + final_dx, self.ram.py + final_dy) {
-                self.ram.pdx = final_dx;
-                self.ram.pdy = final_dy;
+            // Use the already-checked input values (no redundant check)
+            if !is_wall(self.ram.px + wantdx, self.ram.py + wantdy) {
+                self.ram.pdx = wantdx;
+                self.ram.pdy = wantdy;
             }
             
             let mut nx = self.ram.px + self.ram.pdx;
@@ -413,78 +411,91 @@ impl Game {
         }
     }
 
-    fn draw(&self, canvas: &mut sdl2::render::Canvas<sdl2::video::Window>) -> Result<(), String> {
+    fn draw(&mut self, canvas: &mut sdl2::render::Canvas<sdl2::video::Window>) -> Result<(), String> {
         // clear
         canvas.set_draw_color(Color::RGB(0, 0, 0));
         canvas.clear();
 
-        // compute integer scaling - account for score area at top
+        // Optimization: Cache scaling calculations - only recalculate if window size changed
         let (ww, wh) = canvas.window().size();
         let ww = ww as i32;
         let wh = wh as i32;
-        let total_view_h = VIEW_H + SCORE_AREA;
-        let sx = ww as f32 / VIEW_W as f32;
-        let sy = wh as f32 / total_view_h as f32;
-        let s = sx.min(sy);
-        let sw = (VIEW_W as f32 * s).floor() as i32;
-        let total_sh = (total_view_h as f32 * s).floor() as i32;
-        let ox = (ww - sw) / 2;
-        let oy = (wh - total_sh) / 2;
-
-        // Draw score first at the top (before creating closure that borrows canvas)
+        
+        if self.window_size_changed {
+            let total_view_h = VIEW_H + SCORE_AREA;
+            let sx = ww as f32 / VIEW_W as f32;
+            let sy = wh as f32 / total_view_h as f32;
+            self.cached_scale = sx.min(sy);
+            self.cached_sw = (VIEW_W as f32 * self.cached_scale).floor() as i32;
+            let total_sh = (total_view_h as f32 * self.cached_scale).floor() as i32;
+            self.cached_ox = (ww - self.cached_sw) / 2;
+            self.cached_oy = (wh - total_sh) / 2;
+            let score_area_scaled = (SCORE_AREA as f32 * self.cached_scale).floor() as i32;
+            self.cached_game_start_y = self.cached_oy + score_area_scaled;
+            self.window_size_changed = false;
+        }
+        
+        let s = self.cached_scale;
+        let ox = self.cached_ox;
+        let oy = self.cached_oy;
+        let game_start_y = self.cached_game_start_y;
+        let sw = self.cached_sw;
         let score_area_scaled = (SCORE_AREA as f32 * s).floor() as i32;
-        let game_start_y = oy + score_area_scaled;
+
+        // Draw score first at the top
         self.draw_score_simple(canvas, ox, oy, s, score_area_scaled, sw);
         
-        let mut draw_rect = |x: i32, y: i32, w: i32, h: i32, color: Color| {
+        // Optimization: Batch rendering - collect all rectangles first, then draw in batches
+        // Pre-allocate with estimated capacity to avoid reallocations
+        let mut wall_rects = Vec::with_capacity(200);
+        let mut pellet_rects = Vec::with_capacity(300);
+        let mut power_pellet_rects_white = Vec::with_capacity(4);
+        let mut power_pellet_rects_cyan = Vec::with_capacity(4);
+        
+        // Helper to convert game coordinates to screen coordinates
+        let to_screen = |x: i32, y: i32, w: i32, h: i32| -> Rect {
             let rx = ox + ((x as f32) * s) as i32;
-            let ry = game_start_y + ((y as f32) * s) as i32; // Offset by score area
+            let ry = game_start_y + ((y as f32) * s) as i32;
             let rw = (w as f32 * s).ceil() as i32;
             let rh = (h as f32 * s).ceil() as i32;
-            canvas.set_draw_color(color);
-            let _ = canvas.fill_rect(Rect::new(rx, ry, rw as u32, rh as u32));
+            Rect::new(rx, ry, rw as u32, rh as u32)
         };
 
-        // walls & pellets (pellet render is cosmetic; removal uses shadow map)
+        // Collect all rectangles
         for y in 0..GRID_H {
             let bytes = MAZE[y as usize].as_bytes();
             for x in 0..GRID_W {
                 let c = bytes[x as usize];
                 match c {
                     b'#' => {
-                        // Atari 2600: Blue walls (or cyan in some versions)
-                        draw_rect(x * TILE, y * TILE, TILE, TILE, Color::RGB(0, 100, 255));
+                        wall_rects.push(to_screen(x * TILE, y * TILE, TILE, TILE));
                     }
                     b'.' => {
-                        // Regular pellet: small white/yellow dot
                         let idx = Game::pellet_idx(x, y);
                         if !self.eaten[idx] {
-                            draw_rect(
+                            pellet_rects.push(to_screen(
                                 x * TILE + TILE / 2 - 1,
                                 y * TILE + TILE / 2 - 1,
                                 2,
                                 2,
-                                Color::RGB(255, 255, 255), // White pellets (Atari 2600 style)
-                            );
+                            ));
                         }
                     }
                     b'*' => {
-                        // Power pellet: larger, flashing white/cyan
                         let idx = Game::pellet_idx(x, y);
                         if !self.eaten[idx] {
-                            let flash = (self.ram.frame / 15) % 2 == 0; // Flash every ~0.25 seconds
-                            let color = if flash { 
-                                Color::RGB(0, 255, 255) // Cyan when flashing
-                            } else { 
-                                Color::RGB(255, 255, 255) // White
-                            };
-                            draw_rect(
+                            let flash = (self.ram.frame / 15) % 2 == 0;
+                            let rect = to_screen(
                                 x * TILE + TILE / 2 - 2,
                                 y * TILE + TILE / 2 - 2,
                                 4,
                                 4,
-                                color,
                             );
+                            if flash {
+                                power_pellet_rects_cyan.push(rect);
+                            } else {
+                                power_pellet_rects_white.push(rect);
+                            }
                         }
                     }
                     _ => {}
@@ -492,18 +503,46 @@ impl Game {
             }
         }
 
-        // player (yellow Pacman - Atari 2600 style)
-        draw_rect(
+        // Draw in batches (only 4-5 set_draw_color calls instead of 868+)
+        if !wall_rects.is_empty() {
+            canvas.set_draw_color(Color::RGB(0, 100, 255));
+            for rect in &wall_rects {
+                let _ = canvas.fill_rect(*rect);
+            }
+        }
+        
+        if !pellet_rects.is_empty() {
+            canvas.set_draw_color(Color::RGB(255, 255, 255));
+            for rect in &pellet_rects {
+                let _ = canvas.fill_rect(*rect);
+            }
+        }
+        
+        if !power_pellet_rects_white.is_empty() {
+            canvas.set_draw_color(Color::RGB(255, 255, 255));
+            for rect in &power_pellet_rects_white {
+                let _ = canvas.fill_rect(*rect);
+            }
+        }
+        
+        if !power_pellet_rects_cyan.is_empty() {
+            canvas.set_draw_color(Color::RGB(0, 255, 255));
+            for rect in &power_pellet_rects_cyan {
+                let _ = canvas.fill_rect(*rect);
+            }
+        }
+
+        // Player (yellow Pacman)
+        canvas.set_draw_color(Color::RGB(255, 255, 0));
+        let _ = canvas.fill_rect(to_screen(
             self.ram.px * TILE,
             self.ram.py * TILE,
             TILE,
             TILE,
-            Color::RGB(255, 255, 0), // Yellow
-        );
+        ));
 
-        // ghost (red normally, blue when vulnerable - Atari 2600 style)
+        // Ghost (red normally, blue when vulnerable)
         let ghost_color = if self.ram.ghost_vulnerable {
-            // Flash between blue and white when timer is running low
             if self.ram.power_pellet_timer < 120 && (self.ram.frame / 10) % 2 == 0 {
                 Color::RGB(255, 255, 255) // White (flashing when about to expire)
             } else {
@@ -512,13 +551,13 @@ impl Game {
         } else {
             Color::RGB(255, 0, 0) // Red (normal)
         };
-        draw_rect(
+        canvas.set_draw_color(ghost_color);
+        let _ = canvas.fill_rect(to_screen(
             self.ram.gx * TILE,
             self.ram.gy * TILE,
             TILE,
             TILE,
-            ghost_color,
-        );
+        ));
 
         // dead overlay
         if !self.ram.alive {
@@ -638,6 +677,13 @@ fn main() -> Result<(), String> {
             match e {
                 Event::Quit { .. } => break 'running,
                 Event::KeyDown { scancode: Some(Scancode::Escape), .. } => break 'running,
+                Event::Window { win_event, .. } => {
+                    // Optimization: Mark window size changed on resize
+                    if matches!(win_event, sdl2::event::WindowEvent::Resized(_, _) | 
+                                       sdl2::event::WindowEvent::SizeChanged(_, _)) {
+                        game.window_size_changed = true;
+                    }
+                }
                 _ => {}
             }
         }
