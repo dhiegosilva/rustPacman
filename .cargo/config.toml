@@ -1,0 +1,7 @@
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"
+
+[env]
+# Add MinGW library path so linker can find SDL2
+RUSTFLAGS = "-L native=C:/msys64/mingw64/lib"
+
