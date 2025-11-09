@@ -1,8 +1,17 @@
-// Rendering code
+//! Rendering code
+//! 
+//! This module handles all drawing operations:
+//! - Score display
+//! - Game elements (maze, player, ghosts, pellets)
+//! - Sprite rendering (Pac-Man and ghosts)
 
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
-use crate::constants::{GRID_W, GRID_H, TILE, VIEW_W, VIEW_H, SCORE_AREA};
+use crate::constants::{
+    GRID_W, GRID_H, TILE, VIEW_W, VIEW_H, SCORE_AREA,
+    PACMAN_MOUTH_ANIMATION_SPEED, GHOST_WAVE_ANIMATION_SPEED,
+    POWER_PELLET_FLASH_SPEED, POWER_PELLET_FLASH_START
+};
 use crate::maze::get_maze;
 
 pub struct RenderCache {
@@ -166,7 +175,7 @@ pub fn draw_game(
                 b'*' => {
                     let idx = (y * GRID_W + x) as usize;
                     if !eaten[idx] {
-                        let flash = (frame / 15) % 2 == 0;
+                        let flash = (frame / POWER_PELLET_FLASH_SPEED) % 2 == 0;
                         let rect = to_screen(
                             x * TILE + TILE / 2 - 2,
                             y * TILE + TILE / 2 - 2,
@@ -221,7 +230,7 @@ pub fn draw_game(
     let ghost_colors = [Color::RGB(255, 0, 0), Color::RGB(255, 184, 255), Color::RGB(0, 255, 255)]; // Red, Pink, Cyan
     for (i, (ghost_x, ghost_y, ghost_vulnerable)) in ghosts.iter().enumerate() {
         let ghost_color = if *ghost_vulnerable {
-            if power_pellet_timer < 120 && (frame / 10) % 2 == 0 {
+            if power_pellet_timer < POWER_PELLET_FLASH_START && (frame / GHOST_WAVE_ANIMATION_SPEED) % 2 == 0 {
                 Color::RGB(255, 255, 255) // White (flashing when about to expire)
             } else {
                 Color::RGB(0, 100, 255) // Blue (vulnerable)
@@ -251,7 +260,7 @@ fn draw_pacman(
 ) -> Result<(), String> {
     // Pac-Man sprite: 6x6 pixels
     // Mouth animation: 0=closed, 1=half, 2=open, 3=half (cycle)
-    let mouth_frame = (frame / 8) % 4;
+    let mouth_frame = (frame / PACMAN_MOUTH_ANIMATION_SPEED) % 4;
     
     // Boolean array for Pac-Man (6x6) - true = yellow pixel
     let sprite: [[bool; 6]; 6] = match mouth_frame {
@@ -317,7 +326,7 @@ fn draw_ghost(
 ) -> Result<(), String> {
     // Ghost sprite: 6x6 pixels
     // Wavy bottom animation
-    let wave_frame = (frame / 10) % 2;
+    let wave_frame = (frame / GHOST_WAVE_ANIMATION_SPEED) % 2;
     
     // Boolean array for ghost (6x6) - true = ghost body pixel
     // Top: rounded head, middle: body, bottom: wavy

@@ -1,7 +1,17 @@
-// Maze logic and tile checking functions
+//! Maze logic and tile checking functions
+//! 
+//! This module provides functions to check what's at specific positions in the maze:
+//! - Walls (#)
+//! - Pellets (.)
+//! - Power pellets (*)
+//! - Empty spaces
 
 use crate::constants::{GRID_W, GRID_H};
 
+/// Gets a reference to the currently selected maze
+/// 
+/// Returns the maze as a slice of strings, where each string is a row.
+/// Each character represents a tile: '#' = wall, '.' = pellet, '*' = power pellet
 #[inline]
 pub fn get_maze() -> &'static [&'static str] {
     unsafe { 
@@ -10,6 +20,14 @@ pub fn get_maze() -> &'static [&'static str] {
     }
 }
 
+/// Checks if the given position contains a wall
+/// 
+/// # Arguments
+/// * `x` - X coordinate (0 to GRID_W-1)
+/// * `y` - Y coordinate (0 to GRID_H-1)
+/// 
+/// # Returns
+/// `true` if the position is out of bounds or contains a wall ('#'), `false` otherwise
 #[inline]
 pub fn is_wall(x: i32, y: i32) -> bool {
     if x < 0 || x >= GRID_W || y < 0 || y >= GRID_H {
@@ -27,6 +45,14 @@ pub fn is_wall(x: i32, y: i32) -> bool {
     row.as_bytes()[x as usize] == b'#'
 }
 
+/// Checks if the given position contains a pellet (regular or power)
+/// 
+/// # Arguments
+/// * `x` - X coordinate (0 to GRID_W-1)
+/// * `y` - Y coordinate (0 to GRID_H-1)
+/// 
+/// # Returns
+/// `true` if the position contains '.' (pellet) or '*' (power pellet), `false` otherwise
 #[inline]
 pub fn is_pellet(x: i32, y: i32) -> bool {
     if x < 0 || x >= GRID_W || y < 0 || y >= GRID_H {
@@ -45,6 +71,14 @@ pub fn is_pellet(x: i32, y: i32) -> bool {
     c == b'.' || c == b'*'
 }
 
+/// Checks if the given position contains a power pellet
+/// 
+/// # Arguments
+/// * `x` - X coordinate (0 to GRID_W-1)
+/// * `y` - Y coordinate (0 to GRID_H-1)
+/// 
+/// # Returns
+/// `true` if the position contains '*' (power pellet), `false` otherwise
 #[inline]
 pub fn is_power_pellet(x: i32, y: i32) -> bool {
     if x < 0 || x >= GRID_W || y < 0 || y >= GRID_H {
@@ -62,6 +96,14 @@ pub fn is_power_pellet(x: i32, y: i32) -> bool {
     row.as_bytes()[x as usize] == b'*'
 }
 
+/// Checks if the given position is empty (not a wall)
+/// 
+/// # Arguments
+/// * `x` - X coordinate (0 to GRID_W-1)
+/// * `y` - Y coordinate (0 to GRID_H-1)
+/// 
+/// # Returns
+/// `true` if the position is not a wall, `false` if it's a wall or out of bounds
 #[inline]
 pub fn is_empty(x: i32, y: i32) -> bool {
     if x < 0 || x >= GRID_W || y < 0 || y >= GRID_H {
@@ -79,6 +121,10 @@ pub fn is_empty(x: i32, y: i32) -> bool {
     row.as_bytes()[x as usize] != b'#'
 }
 
+/// Counts the total number of pellets (regular + power) in the current maze
+/// 
+/// # Returns
+/// The total number of pellets in the maze
 pub fn count_pellets() -> i32 {
     let mut count = 0;
     for y in 0..GRID_H {
