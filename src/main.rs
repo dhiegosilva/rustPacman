@@ -140,6 +140,9 @@ struct Game {
     cached_game_start_y: i32,
     cached_sw: i32,
     window_size_changed: bool,
+    // Input queuing for better direction changes
+    queued_dx: i32,
+    queued_dy: i32,
 }
 
 impl Game {
@@ -182,6 +185,8 @@ impl Game {
             cached_game_start_y: 0,
             cached_sw: 0,
             window_size_changed: true,
+            queued_dx: 0,
+            queued_dy: 0,
         }
     }
 
@@ -277,32 +282,48 @@ impl Game {
         self.ram.gdy = dy;
     }
 
+    // Process input immediately when key is pressed (instantaneous response)
+    fn process_input(&mut self, dx: i32, dy: i32) {
+        // Always update queued direction (for perpendicular turns)
+        if dx != self.ram.pdx || dy != self.ram.pdy {
+            self.queued_dx = dx;
+            self.queued_dy = dy;
+        }
+
+        // Check if we can change direction immediately
+        let is_aligned = self.player_sub == 0;
+        let is_perpendicular = (dx != 0 && self.ram.pdy != 0) || (dy != 0 && self.ram.pdx != 0);
+        let can_turn = (dx != self.ram.pdx || dy != self.ram.pdy) && 
+                       !is_wall(self.ram.px + dx, self.ram.py + dy);
+        let can_reverse = dx == -self.ram.pdx && dy == -self.ram.pdy;
+        
+        // Allow immediate turn if:
+        // - Aligned to grid AND can turn, OR
+        // - Perpendicular turn (90-degree) - allow even when not perfectly aligned, OR
+        // - Reverse direction (180-degree) - always allowed
+        if can_turn && (is_aligned || is_perpendicular || can_reverse) {
+            self.ram.pdx = dx;
+            self.ram.pdy = dy;
+            // Clear queue if we successfully turned
+            if dx == self.queued_dx && dy == self.queued_dy {
+                self.queued_dx = 0;
+                self.queued_dy = 0;
+            }
+        }
+    }
+
     fn tick(&mut self, keyboard: &sdl2::keyboard::KeyboardState) {
         self.ram.frame = self.ram.frame.wrapping_add(1);
 
-        // Optimization: Check input ONCE per frame instead of twice
-        let mut wantdx = self.ram.pdx;
-        let mut wantdy = self.ram.pdy;
-
+        // Check current keyboard state for held keys (fallback)
         if keyboard.is_scancode_pressed(Scancode::Up) {
-            wantdx = 0; wantdy = -1;
+            self.process_input(0, -1);
         } else if keyboard.is_scancode_pressed(Scancode::Down) {
-            wantdx = 0; wantdy = 1;
+            self.process_input(0, 1);
         } else if keyboard.is_scancode_pressed(Scancode::Left) {
-            wantdx = -1; wantdy = 0;
+            self.process_input(-1, 0);
         } else if keyboard.is_scancode_pressed(Scancode::Right) {
-            wantdx = 1; wantdy = 0;
-        }
-
-        // Check if we can change direction
-        let is_aligned = self.player_sub == 0;
-        let can_turn = (wantdx != self.ram.pdx || wantdy != self.ram.pdy) && 
-                       !is_wall(self.ram.px + wantdx, self.ram.py + wantdy);
-        let can_reverse = wantdx == -self.ram.pdx && wantdy == -self.ram.pdy;
-        
-        if can_turn && (is_aligned || can_reverse) {
-            self.ram.pdx = wantdx;
-            self.ram.pdy = wantdy;
+            self.process_input(1, 0);
         }
 
         // player moves every N sub-frames (integer speed) - slower for Atari 2600 feel
@@ -310,10 +331,18 @@ impl Game {
         if self.player_sub >= 4 {
             self.player_sub = 0;
             
-            // Use the already-checked input values (no redundant check)
-            if !is_wall(self.ram.px + wantdx, self.ram.py + wantdy) {
-                self.ram.pdx = wantdx;
-                self.ram.pdy = wantdy;
+            // Check queued direction when aligned (for perpendicular turns that were queued)
+            if self.queued_dx != 0 || self.queued_dy != 0 {
+                if !is_wall(self.ram.px + self.queued_dx, self.ram.py + self.queued_dy) {
+                    self.ram.pdx = self.queued_dx;
+                    self.ram.pdy = self.queued_dy;
+                    self.queued_dx = 0;
+                    self.queued_dy = 0;
+                } else {
+                    // Can't turn to queued direction, clear queue
+                    self.queued_dx = 0;
+                    self.queued_dy = 0;
+                }
             }
             
             let mut nx = self.ram.px + self.ram.pdx;
@@ -329,9 +358,11 @@ impl Game {
                 self.ram.px = nx;
                 self.ram.py = ny;
             } else {
-                // Hit a wall, stop
+                // Hit a wall, stop and clear queue
                 self.ram.pdx = 0;
                 self.ram.pdy = 0;
+                self.queued_dx = 0;
+                self.queued_dy = 0;
             }
         }
 
@@ -673,10 +704,25 @@ fn main() -> Result<(), String> {
     let dt = DT;
 
     'running: loop {
+        // Process ALL events immediately - instantaneous input response
+        // No queuing, no waiting - process input the moment the key is pressed
         for e in event_pump.poll_iter() {
             match e {
                 Event::Quit { .. } => break 'running,
                 Event::KeyDown { scancode: Some(Scancode::Escape), .. } => break 'running,
+                Event::KeyDown { scancode: Some(Scancode::Up), .. } => {
+                    // Process input INSTANTLY - no delay, no queuing
+                    game.process_input(0, -1);
+                }
+                Event::KeyDown { scancode: Some(Scancode::Down), .. } => {
+                    game.process_input(0, 1);
+                }
+                Event::KeyDown { scancode: Some(Scancode::Left), .. } => {
+                    game.process_input(-1, 0);
+                }
+                Event::KeyDown { scancode: Some(Scancode::Right), .. } => {
+                    game.process_input(1, 0);
+                }
                 Event::Window { win_event, .. } => {
                     // Optimization: Mark window size changed on resize
                     if matches!(win_event, sdl2::event::WindowEvent::Resized(_, _) | 
