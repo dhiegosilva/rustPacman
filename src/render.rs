@@ -214,16 +214,10 @@ pub fn draw_game(
         }
     }
 
-    // Player (yellow Pacman)
-    canvas.set_draw_color(Color::RGB(255, 255, 0));
-    let _ = canvas.fill_rect(to_screen(
-        player_x * TILE,
-        player_y * TILE,
-        TILE,
-        TILE,
-    ));
+    // Player (Pac-Man sprite with animated mouth)
+    draw_pacman(canvas, &to_screen, player_x * TILE, player_y * TILE, frame)?;
 
-    // Ghosts (different colors, blue when vulnerable)
+    // Ghosts (sprite with eyes and body)
     let ghost_colors = [Color::RGB(255, 0, 0), Color::RGB(255, 184, 255), Color::RGB(0, 255, 255)]; // Red, Pink, Cyan
     for (i, (ghost_x, ghost_y, ghost_vulnerable)) in ghosts.iter().enumerate() {
         let ghost_color = if *ghost_vulnerable {
@@ -235,13 +229,7 @@ pub fn draw_game(
         } else {
             ghost_colors[i.min(2)]
         };
-        canvas.set_draw_color(ghost_color);
-        let _ = canvas.fill_rect(to_screen(
-            *ghost_x * TILE,
-            *ghost_y * TILE,
-            TILE,
-            TILE,
-        ));
+        draw_ghost(canvas, &to_screen, *ghost_x * TILE, *ghost_y * TILE, ghost_color, frame)?;
     }
 
     // Dead overlay
@@ -250,6 +238,130 @@ pub fn draw_game(
         let _ = canvas.fill_rect(Rect::new(0, 0, ww, wh));
     }
 
+    Ok(())
+}
+
+// Draw Pac-Man sprite (6x6 pixels with animated mouth)
+fn draw_pacman(
+    canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
+    to_screen: &dyn Fn(i32, i32, i32, i32) -> Rect,
+    x: i32,
+    y: i32,
+    frame: u32,
+) -> Result<(), String> {
+    // Pac-Man sprite: 6x6 pixels
+    // Mouth animation: 0=closed, 1=half, 2=open, 3=half (cycle)
+    let mouth_frame = (frame / 8) % 4;
+    
+    // Boolean array for Pac-Man (6x6) - true = yellow pixel
+    let sprite: [[bool; 6]; 6] = match mouth_frame {
+        0 => [
+            [false, true, true, true, true, false], // Closed mouth (circle)
+            [true, true, true, true, true, true],
+            [true, true, true, true, true, true],
+            [true, true, true, true, true, true],
+            [true, true, true, true, true, true],
+            [false, true, true, true, true, false],
+        ],
+        1 => [
+            [false, true, true, true, true, false], // Half open
+            [true, true, true, true, true, true],
+            [true, true, false, false, true, true],
+            [true, true, false, false, true, true],
+            [true, true, true, true, true, true],
+            [false, true, true, true, true, false],
+        ],
+        2 => [
+            [false, true, true, true, true, false], // Open
+            [true, true, true, true, true, true],
+            [true, false, false, false, false, true],
+            [false, false, false, false, false, false],
+            [true, true, true, true, true, true],
+            [false, true, true, true, true, false],
+        ],
+        _ => [
+            [false, true, true, true, true, false], // Half open
+            [true, true, true, true, true, true],
+            [true, true, false, false, true, true],
+            [true, true, false, false, true, true],
+            [true, true, true, true, true, true],
+            [false, true, true, true, true, false],
+        ],
+    };
+    
+    canvas.set_draw_color(Color::RGB(255, 255, 0));
+    for (row, row_bits) in sprite.iter().enumerate() {
+        for col in 0..6 {
+            if row_bits[col] {
+                let pixel_size = 1;
+                let _ = canvas.fill_rect(to_screen(
+                    x + col as i32 * pixel_size,
+                    y + row as i32 * pixel_size,
+                    pixel_size,
+                    pixel_size,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+// Draw ghost sprite (6x6 pixels with eyes and wavy bottom)
+fn draw_ghost(
+    canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
+    to_screen: &dyn Fn(i32, i32, i32, i32) -> Rect,
+    x: i32,
+    y: i32,
+    color: Color,
+    frame: u32,
+) -> Result<(), String> {
+    // Ghost sprite: 6x6 pixels
+    // Wavy bottom animation
+    let wave_frame = (frame / 10) % 2;
+    
+    // Boolean array for ghost (6x6) - true = ghost body pixel
+    // Top: rounded head, middle: body, bottom: wavy
+    let sprite: [[bool; 6]; 6] = [
+        [false, true, true, true, true, false], // Row 0: rounded top
+        [true, true, true, true, true, true], // Row 1: top of body
+        [true, false, true, true, false, true], // Row 2: eyes area (will draw eyes separately)
+        [true, true, true, true, true, true], // Row 3: body
+        if wave_frame == 0 {
+            [true, true, false, false, true, true] // Row 4: wavy bottom (pattern 1)
+        } else {
+            [false, false, true, true, false, false] // Row 4: wavy bottom (pattern 2)
+        },
+        if wave_frame == 0 {
+            [true, true, false, false, true, true] // Row 5: wavy bottom (pattern 1)
+        } else {
+            [false, false, true, true, false, false] // Row 5: wavy bottom (pattern 2)
+        },
+    ];
+    
+    canvas.set_draw_color(color);
+    for (row, row_bits) in sprite.iter().enumerate() {
+        for col in 0..6 {
+            if row_bits[col] {
+                let pixel_size = 1;
+                let _ = canvas.fill_rect(to_screen(
+                    x + col as i32 * pixel_size,
+                    y + row as i32 * pixel_size,
+                    pixel_size,
+                    pixel_size,
+                ));
+            }
+        }
+    }
+    
+    // Draw white eyes (skip if vulnerable)
+    if color != Color::RGB(0, 100, 255) && color != Color::RGB(255, 255, 255) {
+        canvas.set_draw_color(Color::RGB(255, 255, 255));
+        let eye_positions = [(1, 2), (4, 2)]; // Two eyes at row 2
+        for (ex, ey) in eye_positions.iter() {
+            let _ = canvas.fill_rect(to_screen(x + *ex, y + *ey, 1, 1));
+        }
+    }
+    
     Ok(())
 }
 
