@@ -151,10 +151,10 @@ fn main() -> Result<(), String> {
                 while time_accumulator >= delta_time {
                     if current_game.alive {
                         current_game.tick(&keyboard_state);
-                    }
+            }
                     time_accumulator -= delta_time;
-                }
-                
+        }
+
                 // Draw the game
                 current_game.draw(&mut canvas)?;
             }
