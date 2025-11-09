@@ -13,6 +13,7 @@ use crate::player::Player;
 use crate::ghost::Ghost;
 use crate::rng::Lfsr;
 use crate::render::{RenderCache, draw_score, draw_game};
+use crate::game_config::{GameConfig, GameMode, PlayerRole};
 use sdl2::keyboard::Scancode;
 
 /// Main game state structure
@@ -41,12 +42,27 @@ pub struct Game {
     pub ghost_eaten_count: i32,
     /// Rendering cache for performance optimization
     pub render_cache: RenderCache,
+    /// Game configuration (player modes and roles)
+    pub config: GameConfig,
+    /// Which ghost is controlled by player (if any)
+    pub player_ghost_index: Option<usize>,
 }
 
 impl Game {
     /// Creates a new game with initial state
-    pub fn new() -> Self {
+    pub fn new(config: GameConfig) -> Self {
         let total_pellets = count_pellets();
+        
+        // Determine which ghost is player-controlled (if any)
+        let player_ghost_index = if config.player1_role == PlayerRole::Ghost {
+            Some(0)  // First ghost is player 1
+        } else if config.mode == GameMode::Multiplayer && 
+                  config.player2_role == Some(PlayerRole::Ghost) {
+            Some(1)  // Second ghost is player 2
+        } else {
+            None
+        };
+        
         Self {
             player: Player::new(),
             ghosts: [
@@ -63,21 +79,14 @@ impl Game {
             power_pellet_timer: 0,
             ghost_eaten_count: 0,
             render_cache: RenderCache::new(),
+            config,
+            player_ghost_index,
         }
     }
 
     /// Converts grid coordinates (x, y) to an index in the eaten array
     fn pellet_index(x: i32, y: i32) -> usize {
         (y * GRID_W + x) as usize
-    }
-
-    /// Processes input from the keyboard
-    /// 
-    /// # Arguments
-    /// * `dx` - Desired X direction (-1 = left, 0 = none, 1 = right)
-    /// * `dy` - Desired Y direction (-1 = up, 0 = none, 1 = down)
-    pub fn process_input(&mut self, dx: i32, dy: i32) {
-        self.player.process_input(dx, dy);
     }
 
     /// Updates the game state for one frame
@@ -92,21 +101,65 @@ impl Game {
     /// 
     /// # Arguments
     /// * `keyboard` - Current keyboard state (for held keys as fallback)
-    pub fn tick(&mut self, keyboard: &sdl2::keyboard::KeyboardState) {
+    /// * `player2_input` - Optional input for player 2 (in multiplayer)
+    pub fn tick(&mut self, keyboard: &sdl2::keyboard::KeyboardState, player2_input: Option<(i32, i32)>) {
         self.frame = self.frame.wrapping_add(1);
 
-        // Check current keyboard state for held keys (fallback for continuous input)
-        const DIRECTION_KEYS: [(Scancode, (i32, i32)); 4] = [
-            (Scancode::Up, (0, -1)),
-            (Scancode::Down, (0, 1)),
-            (Scancode::Left, (-1, 0)),
-            (Scancode::Right, (1, 0)),
-        ];
-        if let Some((_, (dx, dy))) = DIRECTION_KEYS.iter().find(|(sc, _)| keyboard.is_scancode_pressed(*sc)) {
-            self.process_input(*dx, *dy);
+        // Handle player 1 input (Pac-Man or Ghost)
+        let player1_is_pacman = self.config.player1_role == PlayerRole::PacMan;
+        let player1_is_ghost = self.config.player1_role == PlayerRole::Ghost;
+        
+        if player1_is_pacman {
+            // Player 1 controls Pac-Man
+            const DIRECTION_KEYS: [(Scancode, (i32, i32)); 4] = [
+                (Scancode::Up, (0, -1)),
+                (Scancode::Down, (0, 1)),
+                (Scancode::Left, (-1, 0)),
+                (Scancode::Right, (1, 0)),
+            ];
+            if let Some((_, (dx, dy))) = DIRECTION_KEYS.iter().find(|(sc, _)| keyboard.is_scancode_pressed(*sc)) {
+                self.process_input(*dx, *dy);
+            }
+        } else if player1_is_ghost && self.player_ghost_index == Some(0) {
+            // Player 1 controls first ghost
+            const DIRECTION_KEYS: [(Scancode, (i32, i32)); 4] = [
+                (Scancode::Up, (0, -1)),
+                (Scancode::Down, (0, 1)),
+                (Scancode::Left, (-1, 0)),
+                (Scancode::Right, (1, 0)),
+            ];
+            if let Some((_, (dx, dy))) = DIRECTION_KEYS.iter().find(|(sc, _)| keyboard.is_scancode_pressed(*sc)) {
+                if let Some(ghost) = self.ghosts.get_mut(0) {
+                    ghost.process_input(*dx, *dy);
+                }
+            }
+        }
+        
+        // Handle player 2 input (in multiplayer)
+        if let Some((dx, dy)) = player2_input {
+            let player2_is_pacman = self.config.player2_role == Some(PlayerRole::PacMan);
+            let player2_is_ghost = self.config.player2_role == Some(PlayerRole::Ghost);
+            
+            if player2_is_pacman {
+                // Player 2 controls Pac-Man (in multiplayer)
+                self.process_input(dx, dy);
+            } else if player2_is_ghost && self.player_ghost_index == Some(1) {
+                // Player 2 controls second ghost
+                if let Some(ghost) = self.ghosts.get_mut(1) {
+                    ghost.process_input(dx, dy);
+                }
+            }
         }
 
-        // Update player position
+        // Update Pac-Man (player-controlled or AI)
+        if self.config.pacman_is_ai() {
+            // AI-controlled Pac-Man
+            let ghost_data: Vec<(i32, i32, bool)> = self.ghosts.iter()
+                .map(|ghost| (ghost.x, ghost.y, ghost.vulnerable))
+                .collect();
+            self.player.update_ai(&ghost_data, self.power_pellet_timer > 0, 
+                                 &self.eaten, &mut self.rng);
+        }
         self.player.update();
 
         // Check if player is on a pellet
@@ -116,12 +169,26 @@ impl Game {
         self.update_power_pellet_timer();
 
         // Update all ghosts (AI and movement)
-        for ghost in &mut self.ghosts {
-            ghost.update(&mut self.rng, self.player.x, self.player.y);
+        for (i, ghost) in self.ghosts.iter_mut().enumerate() {
+            // Skip AI update if this ghost is player-controlled
+            let is_player_controlled = self.player_ghost_index == Some(i);
+            if !is_player_controlled {
+                ghost.update(&mut self.rng, self.player.x, self.player.y);
+            } else {
+                // Player-controlled ghost: just update movement
+                ghost.update_movement_only();
+            }
         }
 
         // Check for collisions between player and ghosts
         self.check_collisions();
+    }
+    
+    /// Processes input for Pac-Man (called from main loop)
+    pub fn process_input(&mut self, dx: i32, dy: i32) {
+        if !self.config.pacman_is_ai() {
+            self.player.process_input(dx, dy);
+        }
     }
 
     /// Handles pellet collection when player moves onto a pellet

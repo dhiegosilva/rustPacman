@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use paclike_2600_rs::game::Game;
 use paclike_2600_rs::menu::{Menu, MenuAction};
 use paclike_2600_rs::audio::AudioManager;
+use paclike_2600_rs::game_config::{GameConfig, GameMode, PlayerRole};
 use paclike_2600_rs::constants::{
     VIEW_W, VIEW_H, SCORE_AREA, WINDOW_SCALE, DT, 
     MAZE_1, MAZE_2, CURRENT_MAZE,
@@ -100,6 +101,13 @@ fn main() -> Result<(), String> {
                     }
                 }
                 
+                // Backspace: go back in menu
+                Event::KeyDown { scancode: Some(Scancode::Backspace), .. } => {
+                    if in_menu {
+                        menu.back();
+                    }
+                }
+                
                 // Enter key: select menu option
                 Event::KeyDown { scancode: Some(Scancode::Return), .. } => {
                     if in_menu {
@@ -113,7 +121,15 @@ fn main() -> Result<(), String> {
                                         _ => &MAZE_1 as *const _,  // Default to maze 1
                                     };
                                 }
-                                game = Some(Game::new());
+                                
+                                // Create game config from menu selections
+                                let config = GameConfig::new(
+                                    menu.game_mode.unwrap_or(GameMode::SinglePlayer),
+                                    menu.player1_role.unwrap_or(PlayerRole::PacMan),
+                                    menu.player2_role,
+                                );
+                                
+                                game = Some(Game::new(config));
                                 in_menu = false;
                             }
                             _ => {}
@@ -150,14 +166,31 @@ fn main() -> Result<(), String> {
             // Get keyboard state for held keys (fallback input)
             let keyboard_state = event_pump.keyboard_state();
             
+            // Check for player 2 input (WASD keys for multiplayer)
+            let player2_input = if game.as_ref().map(|g| g.config.mode == GameMode::Multiplayer).unwrap_or(false) {
+                let mut input = None;
+                if keyboard_state.is_scancode_pressed(Scancode::W) {
+                    input = Some((0, -1));
+                } else if keyboard_state.is_scancode_pressed(Scancode::S) {
+                    input = Some((0, 1));
+                } else if keyboard_state.is_scancode_pressed(Scancode::A) {
+                    input = Some((-1, 0));
+                } else if keyboard_state.is_scancode_pressed(Scancode::D) {
+                    input = Some((1, 0));
+                }
+                input
+            } else {
+                None
+            };
+            
             if let Some(ref mut current_game) = game {
                 // Run game updates until we've caught up with real time
                 while time_accumulator >= delta_time {
                     if current_game.alive {
-                        current_game.tick(&keyboard_state);
-            }
+                        current_game.tick(&keyboard_state, player2_input);
+                    }
                     time_accumulator -= delta_time;
-        }
+                }
 
                 // Draw the game
                 current_game.draw(&mut canvas)?;

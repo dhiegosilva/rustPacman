@@ -144,5 +144,89 @@ impl Player {
             }
         }
     }
+    
+    /// AI update for Pac-Man when controlled by computer
+    /// 
+    /// Simple AI that:
+    /// 1. Tries to collect nearby pellets
+    /// 2. Avoids ghosts when not powered up
+    /// 3. Chases ghosts when powered up
+    /// 
+    /// # Arguments
+    /// * `ghosts` - Array of ghosts to avoid/chase
+    /// * `power_pellet_active` - Whether power pellet is active
+    /// * `eaten` - Which pellets have been eaten
+    /// * `rng` - Random number generator for decision making
+    pub fn update_ai(&mut self, ghosts: &[(i32, i32, bool)], power_pellet_active: bool, 
+                     eaten: &[bool], rng: &mut crate::rng::Lfsr) {
+        use crate::maze::{is_pellet, is_wall};
+        use crate::constants::GRID_W;
+        
+        // Only make AI decisions when aligned to grid
+        if self.sub_frame_counter != 0 {
+            return;
+        }
+        
+        // Check all possible directions
+        const DIRECTIONS: [(i32, i32); 4] = [
+            (0, -1),  // Up
+            (0, 1),   // Down
+            (-1, 0),  // Left
+            (1, 0),   // Right
+        ];
+        
+        let mut best_direction = (self.dx, self.dy);
+        let mut best_score = i32::MIN;
+        
+        for (dx, dy) in DIRECTIONS.iter() {
+            let new_x = self.x + dx;
+            let new_y = self.y + dy;
+            
+            // Skip if wall or reverse direction (unless stuck)
+            if is_wall(new_x, new_y) {
+                continue;
+            }
+            if *dx == -self.dx && *dy == -self.dy && (self.dx != 0 || self.dy != 0) {
+                continue;  // Don't reverse unless stuck
+            }
+            
+            let mut score = 0;
+            
+            // Score based on pellets nearby
+            let pellet_index = (new_y * GRID_W + new_x) as usize;
+            if pellet_index < eaten.len() && !eaten[pellet_index] && is_pellet(new_x, new_y) {
+                score += 100;  // High priority for uneaten pellets
+            }
+            
+            // Score based on ghost proximity
+            for (ghost_x, ghost_y, ghost_vulnerable) in ghosts {
+                let distance = (new_x - ghost_x).abs() + (new_y - ghost_y).abs();
+                
+                if power_pellet_active && *ghost_vulnerable {
+                    // Chase vulnerable ghosts
+                    score += (10 - distance).max(0);
+                } else if !power_pellet_active {
+                    // Avoid normal ghosts
+                    score -= (10 - distance).max(0) * 5;
+                }
+            }
+            
+            // Prefer continuing in current direction (slight bias)
+            if *dx == self.dx && *dy == self.dy {
+                score += 5;
+            }
+            
+            if score > best_score {
+                best_score = score;
+                best_direction = (*dx, *dy);
+            }
+        }
+        
+        // Apply best direction
+        if best_direction.0 != 0 || best_direction.1 != 0 {
+            self.dx = best_direction.0;
+            self.dy = best_direction.1;
+        }
+    }
 }
 

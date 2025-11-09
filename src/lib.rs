@@ -9,4 +9,5 @@ pub mod render;
 pub mod game;
 pub mod menu;
 pub mod audio;
+pub mod game_config;
 

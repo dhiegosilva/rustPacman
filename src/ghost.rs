@@ -220,5 +220,53 @@ impl Ghost {
         self.dx = 0;
         self.dy = -1;  // Start moving up
     }
+    
+    /// Processes input for player-controlled ghost
+    /// 
+    /// Similar to player input processing - allows direction changes
+    pub fn process_input(&mut self, dx: i32, dy: i32) {
+        // Check if we can change direction
+        let can_turn = (dx != self.dx || dy != self.dy) && 
+                       !is_wall(self.x + dx, self.y + dy);
+        let is_reverse_turn = dx == -self.dx && dy == -self.dy;
+        let is_aligned = self.sub_frame_counter == 0;
+        
+        // Allow turn if aligned and can turn, or reverse direction
+        if can_turn && (is_aligned || is_reverse_turn) {
+            self.dx = dx;
+            self.dy = dy;
+        }
+    }
+    
+    /// Updates only movement for player-controlled ghost (no AI)
+    pub fn update_movement_only(&mut self) {
+        // Move ghost when enough sub-frames have passed
+        self.sub_frame_counter += 1;
+        if self.sub_frame_counter >= GHOST_MOVE_SUBFRAMES {
+            self.sub_frame_counter = 0;
+            
+            // Calculate new position
+            let mut new_x = self.x + self.dx;
+            let mut new_y = self.y + self.dy;
+            
+            // Handle tunnel wrapping
+            if new_y == TUNNEL_ROW && new_x < 0 {
+                new_x = GRID_W - 1;
+            }
+            if new_y == TUNNEL_ROW && new_x >= GRID_W {
+                new_x = 0;
+            }
+            
+            // Move if there's no wall, otherwise stop
+            if !is_wall(new_x, new_y) {
+                self.x = new_x;
+                self.y = new_y;
+            } else {
+                // Hit a wall, stop
+                self.dx = 0;
+                self.dy = 0;
+            }
+        }
+    }
 }
 
