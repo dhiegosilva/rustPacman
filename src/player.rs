@@ -58,9 +58,9 @@ impl Player {
     }
 
     pub fn update(&mut self) {
-        // Player moves every N sub-frames (integer speed) - slower for Atari 2600 feel
+        // Player moves every N sub-frames (integer speed) - 20% slower
         self.sub += 1;
-        if self.sub >= 4 {
+        if self.sub >= 5 {
             self.sub = 0;
             
             // Check queued direction when aligned (for perpendicular turns that were queued)

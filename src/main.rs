@@ -4,7 +4,8 @@ use sdl2::event::Event;
 use sdl2::keyboard::Scancode;
 use std::time::{Duration, Instant};
 use paclike_2600_rs::game::Game;
-use paclike_2600_rs::constants::{VIEW_W, VIEW_H, SCORE_AREA, WINDOW_SCALE, DT};
+use paclike_2600_rs::menu::{Menu, MenuAction};
+use paclike_2600_rs::constants::{VIEW_W, VIEW_H, SCORE_AREA, WINDOW_SCALE, DT, MAZE_1, MAZE_2, CURRENT_MAZE};
 
 fn main() -> Result<(), String> {
     // Init SDL
@@ -31,57 +32,104 @@ fn main() -> Result<(), String> {
 
     // Main loop
     let mut event_pump = sdl.event_pump()?;
-    let mut game = Game::new();
+    let mut menu = Menu::new();
+    let mut game: Option<Game> = None;
     let mut acc = 0.0f64;
     let mut prev = Instant::now();
     let dt = DT;
+    let mut in_menu = true;
 
     'running: loop {
         // Process ALL events immediately - instantaneous input response
-        // No queuing, no waiting - process input the moment the key is pressed
         for e in event_pump.poll_iter() {
             match e {
                 Event::Quit { .. } => break 'running,
-                Event::KeyDown { scancode: Some(Scancode::Escape), .. } => break 'running,
+                Event::KeyDown { scancode: Some(Scancode::Escape), .. } => {
+                    if in_menu {
+                        break 'running;
+                    } else {
+                        in_menu = true;
+                        game = None;
+                    }
+                }
                 Event::KeyDown { scancode: Some(Scancode::Up), .. } => {
-                    // Process input INSTANTLY - no delay, no queuing
-                    game.process_input(0, -1);
+                    if in_menu {
+                        menu.process_input(0, -1);
+                    } else if let Some(ref mut g) = game {
+                        g.process_input(0, -1);
+                    }
                 }
                 Event::KeyDown { scancode: Some(Scancode::Down), .. } => {
-                    game.process_input(0, 1);
+                    if in_menu {
+                        menu.process_input(0, 1);
+                    } else if let Some(ref mut g) = game {
+                        g.process_input(0, 1);
+                    }
                 }
                 Event::KeyDown { scancode: Some(Scancode::Left), .. } => {
-                    game.process_input(-1, 0);
+                    if !in_menu {
+                        if let Some(ref mut g) = game {
+                            g.process_input(-1, 0);
+                        }
+                    }
                 }
                 Event::KeyDown { scancode: Some(Scancode::Right), .. } => {
-                    game.process_input(1, 0);
+                    if !in_menu {
+                        if let Some(ref mut g) = game {
+                            g.process_input(1, 0);
+                        }
+                    }
+                }
+                Event::KeyDown { scancode: Some(Scancode::Return), .. } => {
+                    if in_menu {
+                        match menu.select() {
+                            MenuAction::SelectMaze(idx) => {
+                                unsafe {
+                                    CURRENT_MAZE = match idx {
+                                        0 => &MAZE_1 as *const _,
+                                        1 => &MAZE_2 as *const _,
+                                        _ => &MAZE_1 as *const _,
+                                    };
+                                }
+                                game = Some(Game::new());
+                                in_menu = false;
+                            }
+                            _ => {}
+                        }
+                    }
                 }
                 Event::Window { win_event, .. } => {
-                    // Mark window size changed on resize
                     if matches!(win_event, sdl2::event::WindowEvent::Resized(_, _) | 
                                        sdl2::event::WindowEvent::SizeChanged(_, _)) {
-                        game.render_cache.window_size_changed = true;
+                        if let Some(ref mut g) = game {
+                            g.render_cache.window_size_changed = true;
+                        }
                     }
                 }
                 _ => {}
             }
         }
 
-        // Fixed-step accumulator
-        let now = Instant::now();
-        let elapsed = now.duration_since(prev);
-        prev = now;
-        acc += (elapsed.as_secs_f64()).min(0.25); // avoid spiral
+        if in_menu {
+            menu.draw(&mut canvas)?;
+        } else {
+            // Fixed-step accumulator
+            let now = Instant::now();
+            let elapsed = now.duration_since(prev);
+            prev = now;
+            acc += (elapsed.as_secs_f64()).min(0.25); // avoid spiral
 
-        let keys = event_pump.keyboard_state();
-        while acc >= dt {
-            if game.alive {
-                game.tick(&keys);
+            let keys = event_pump.keyboard_state();
+            if let Some(ref mut g) = game {
+                while acc >= dt {
+                    if g.alive {
+                        g.tick(&keys);
+                    }
+                    acc -= dt;
+                }
+                g.draw(&mut canvas)?;
             }
-            acc -= dt;
         }
-
-        game.draw(&mut canvas)?;
         // Small sleep to reduce CPU if vsync off
         std::thread::sleep(Duration::from_millis(1));
     }

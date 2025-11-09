@@ -7,4 +7,5 @@ pub mod player;
 pub mod ghost;
 pub mod render;
 pub mod game;
+pub mod menu;
 

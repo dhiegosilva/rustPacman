@@ -2,7 +2,8 @@
 
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
-use crate::constants::{GRID_W, GRID_H, TILE, VIEW_W, VIEW_H, SCORE_AREA, MAZE};
+use crate::constants::{GRID_W, GRID_H, TILE, VIEW_W, VIEW_H, SCORE_AREA};
+use crate::maze::get_maze;
 
 pub struct RenderCache {
     pub scale: f32,
@@ -97,9 +98,7 @@ pub fn draw_game(
     eaten: &[bool],
     player_x: i32,
     player_y: i32,
-    ghost_x: i32,
-    ghost_y: i32,
-    ghost_vulnerable: bool,
+    ghosts: &[(i32, i32, bool)],
     power_pellet_timer: i32,
     frame: u32,
     alive: bool,
@@ -132,10 +131,23 @@ pub fn draw_game(
     let mut power_pellet_rects_cyan = Vec::with_capacity(4);
 
     // Collect all rectangles
+    let maze = get_maze();
     for y in 0..GRID_H {
-        let bytes = MAZE[y as usize].as_bytes();
+        let y_idx = y as usize;
+        if y_idx >= maze.len() {
+            continue;
+        }
+        let row = maze[y_idx];
+        if row.len() < GRID_W as usize {
+            continue;
+        }
+        let bytes = row.as_bytes();
         for x in 0..GRID_W {
-            let c = bytes[x as usize];
+            let x_idx = x as usize;
+            if x_idx >= bytes.len() {
+                continue;
+            }
+            let c = bytes[x_idx];
             match c {
                 b'#' => {
                     wall_rects.push(to_screen(x * TILE, y * TILE, TILE, TILE));
@@ -211,23 +223,26 @@ pub fn draw_game(
         TILE,
     ));
 
-    // Ghost (red normally, blue when vulnerable)
-    let ghost_color = if ghost_vulnerable {
-        if power_pellet_timer < 120 && (frame / 10) % 2 == 0 {
-            Color::RGB(255, 255, 255) // White (flashing when about to expire)
+    // Ghosts (different colors, blue when vulnerable)
+    let ghost_colors = [Color::RGB(255, 0, 0), Color::RGB(255, 184, 255), Color::RGB(0, 255, 255)]; // Red, Pink, Cyan
+    for (i, (ghost_x, ghost_y, ghost_vulnerable)) in ghosts.iter().enumerate() {
+        let ghost_color = if *ghost_vulnerable {
+            if power_pellet_timer < 120 && (frame / 10) % 2 == 0 {
+                Color::RGB(255, 255, 255) // White (flashing when about to expire)
+            } else {
+                Color::RGB(0, 100, 255) // Blue (vulnerable)
+            }
         } else {
-            Color::RGB(0, 100, 255) // Blue (vulnerable)
-        }
-    } else {
-        Color::RGB(255, 0, 0) // Red (normal)
-    };
-    canvas.set_draw_color(ghost_color);
-    let _ = canvas.fill_rect(to_screen(
-        ghost_x * TILE,
-        ghost_y * TILE,
-        TILE,
-        TILE,
-    ));
+            ghost_colors[i.min(2)]
+        };
+        canvas.set_draw_color(ghost_color);
+        let _ = canvas.fill_rect(to_screen(
+            *ghost_x * TILE,
+            *ghost_y * TILE,
+            TILE,
+            TILE,
+        ));
+    }
 
     // Dead overlay
     if !alive {

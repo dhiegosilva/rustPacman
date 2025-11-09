@@ -10,7 +10,7 @@ use sdl2::keyboard::Scancode;
 
 pub struct Game {
     pub player: Player,
-    pub ghost: Ghost,
+    pub ghosts: [Ghost; 3],
     pub eaten: Vec<bool>, // Shadow pellet map
     pub rng: Lfsr,
     pub frame: u32,
@@ -27,7 +27,11 @@ impl Game {
         let pellets = count_pellets();
         Self {
             player: Player::new(),
-            ghost: Ghost::new(),
+            ghosts: [
+                Ghost::new_at(12, 14),
+                Ghost::new_at(13, 14),
+                Ghost::new_at(14, 14),
+            ],
             eaten: vec![false; (GRID_W * GRID_H) as usize],
             rng: Lfsr::new(0xACE1),
             frame: 0,
@@ -77,7 +81,9 @@ impl Game {
                 if is_power_pellet(self.player.x, self.player.y) {
                     self.score += 50; // Power pellets worth 50 points
                     self.power_pellet_timer = 900; // ~15 seconds at 60 FPS
-                    self.ghost.vulnerable = true;
+                    for ghost in &mut self.ghosts {
+                        ghost.vulnerable = true;
+                    }
                     self.ghost_eaten_count = 0; // Reset multiplier
                 } else {
                     self.score += 10; // Regular pellets worth 10 points
@@ -89,24 +95,31 @@ impl Game {
         if self.power_pellet_timer > 0 {
             self.power_pellet_timer -= 1;
             if self.power_pellet_timer == 0 {
-                self.ghost.vulnerable = false;
+                for ghost in &mut self.ghosts {
+                    ghost.vulnerable = false;
+                }
             }
         }
 
-        // Update ghost
-        self.ghost.update(&mut self.rng, self.player.x, self.player.y);
+        // Update ghosts
+        for ghost in &mut self.ghosts {
+            ghost.update(&mut self.rng, self.player.x, self.player.y);
+        }
 
-        // Collision (tile-precise)
-        if self.player.x == self.ghost.x && self.player.y == self.ghost.y {
-            if self.ghost.vulnerable {
-                // Eat the ghost! Atari 2600 scoring: 200, 400, 800, 1600
-                let points = [200, 400, 800, 1600];
-                let multiplier_idx = self.ghost_eaten_count.min(3) as usize;
-                self.score += points[multiplier_idx];
-                self.ghost_eaten_count += 1;
-                self.ghost.reset_to_center();
-            } else {
-                self.alive = false;
+        // Collision (tile-precise) - check all ghosts
+        for ghost in &mut self.ghosts {
+            if self.player.x == ghost.x && self.player.y == ghost.y {
+                if ghost.vulnerable {
+                    // Eat the ghost! Atari 2600 scoring: 200, 400, 800, 1600
+                    let points = [200, 400, 800, 1600];
+                    let multiplier_idx = self.ghost_eaten_count.min(3) as usize;
+                    self.score += points[multiplier_idx];
+                    self.ghost_eaten_count += 1;
+                    ghost.reset_to_center();
+                } else {
+                    self.alive = false;
+                    break;
+                }
             }
         }
     }
@@ -117,6 +130,11 @@ impl Game {
         // Update cache first
         self.render_cache.update_cache(ww as i32, wh as i32);
         
+        // Prepare ghost data for rendering
+        let ghost_data: Vec<(i32, i32, bool)> = self.ghosts.iter()
+            .map(|g| (g.x, g.y, g.vulnerable))
+            .collect();
+
         // Draw game (this clears the canvas)
         draw_game(
             canvas,
@@ -124,9 +142,7 @@ impl Game {
             &self.eaten,
             self.player.x,
             self.player.y,
-            self.ghost.x,
-            self.ghost.y,
-            self.ghost.vulnerable,
+            &ghost_data,
             self.power_pellet_timer,
             self.frame,
             self.alive,

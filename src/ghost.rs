@@ -31,6 +31,19 @@ impl Ghost {
         }
     }
 
+    pub fn new_at(x: i32, y: i32) -> Self {
+        Self {
+            x,
+            y,
+            dx: 0,
+            dy: -1,
+            sub: 0,
+            think_timer: 0,
+            vulnerable: false,
+            opts_buffer: Vec::with_capacity(4),
+        }
+    }
+
     pub fn think(&mut self, player_x: i32, player_y: i32, rng: &mut Lfsr) {
         self.opts_buffer.clear();
         
@@ -95,9 +108,9 @@ impl Ghost {
             self.think_timer = 0;
         }
 
-        // Ghost moves - slower for Atari 2600 feel
+        // Ghost moves - 20% slower
         self.sub += 1;
-        if self.sub >= 5 {
+        if self.sub >= 6 {
             self.sub = 0;
             let mut nx = self.x + self.dx;
             let ny = self.y + self.dy;
