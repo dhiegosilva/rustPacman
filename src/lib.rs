@@ -8,4 +8,5 @@ pub mod ghost;
 pub mod render;
 pub mod game;
 pub mod menu;
+pub mod audio;
 

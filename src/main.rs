@@ -12,6 +12,7 @@ use sdl2::keyboard::Scancode;
 use std::time::{Duration, Instant};
 use paclike_2600_rs::game::Game;
 use paclike_2600_rs::menu::{Menu, MenuAction};
+use paclike_2600_rs::audio::AudioManager;
 use paclike_2600_rs::constants::{
     VIEW_W, VIEW_H, SCORE_AREA, WINDOW_SCALE, DT, 
     MAZE_1, MAZE_2, CURRENT_MAZE,
@@ -41,6 +42,9 @@ fn main() -> Result<(), String> {
         .build()
         .map_err(|e| e.to_string())?;
 
+    // Initialize audio
+    let _audio_manager = AudioManager::new(&sdl)?;
+    
     // Initialize game state
     let mut event_pump = sdl.event_pump()?;
     let mut menu = Menu::new();
