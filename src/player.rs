@@ -4,7 +4,7 @@
 //! It handles grid-based movement with sub-frame precision for smooth animation.
 
 use crate::constants::{GRID_W, TUNNEL_ROW, PLAYER_START_X, PLAYER_START_Y, PLAYER_MOVE_SUBFRAMES};
-use crate::maze::is_wall;
+use crate::maze::{is_wall, is_teleporter, find_other_teleporter};
 
 /// Represents the player (Pac-Man) in the game
 pub struct Player {
@@ -87,7 +87,8 @@ impl Player {
     /// 2. When enough sub-frames have passed, moves the player
     /// 3. Checks for queued direction changes
     /// 4. Handles tunnel wrapping
-    /// 5. Stops movement if hitting a wall
+    /// 5. Handles teleportation (if on a '1' tile)
+    /// 6. Stops movement if hitting a wall
     pub fn update(&mut self) {
         // Increment sub-frame counter
         self.sub_frame_counter += 1;
@@ -126,6 +127,14 @@ impl Player {
             if !is_wall(new_x, new_y) {
                 self.x = new_x;
                 self.y = new_y;
+                
+                // Check for teleportation: if player is on a teleporter, teleport to the other one
+                if is_teleporter(self.x, self.y) {
+                    if let Some((teleport_x, teleport_y)) = find_other_teleporter(self.x, self.y) {
+                        self.x = teleport_x;
+                        self.y = teleport_y;
+                    }
+                }
             } else {
                 // Hit a wall, stop and clear queue
                 self.dx = 0;
