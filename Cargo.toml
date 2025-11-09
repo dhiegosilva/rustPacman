@@ -3,6 +3,14 @@ name = "paclike_2600_rs"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "paclike_2600_rs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "paclike_2600_rs"
+path = "src/main.rs"
+
 [dependencies]
 sdl2 = "0.35"
 
