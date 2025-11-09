@@ -4,6 +4,8 @@ use crate::constants::{GRID_W, TUNNEL_ROW};
 use crate::maze::is_wall;
 use crate::rng::Lfsr;
 
+const DIRECTIONS: [(i32, i32); 4] = [(0, -1), (0, 1), (-1, 0), (1, 0)];
+
 pub struct Ghost {
     pub x: i32,
     pub y: i32,
@@ -30,55 +32,37 @@ impl Ghost {
     }
 
     pub fn think(&mut self, player_x: i32, player_y: i32, rng: &mut Lfsr) {
-        // Reuse buffer instead of allocating new Vecs
         self.opts_buffer.clear();
         
-        // If vulnerable, try to run away from player (simple flee AI)
         if self.vulnerable {
             // Flee: prefer direction away from player
             let dx_to_player = player_x - self.x;
             let dy_to_player = player_y - self.y;
             
-            let open_n = !is_wall(self.x, self.y - 1);
-            let open_s = !is_wall(self.x, self.y + 1);
-            let open_w = !is_wall(self.x - 1, self.y);
-            let open_e = !is_wall(self.x + 1, self.y);
-
-            if open_n && self.dy != 1 {
-                let priority = if dy_to_player > 0 { 10 } else { 1 };
-                self.opts_buffer.push((0, -1, priority));
+            for (dx, dy) in DIRECTIONS.iter() {
+                if !is_wall(self.x + dx, self.y + dy) && (*dx, *dy) != (-self.dx, -self.dy) {
+                    let priority = if (*dx == 0 && dy_to_player.signum() == -*dy) ||
+                                      (*dy == 0 && dx_to_player.signum() == -*dx) {
+                        10
+                    } else {
+                        1
+                    };
+                    self.opts_buffer.push((*dx, *dy, priority));
+                }
             }
-            if open_s && self.dy != -1 {
-                let priority = if dy_to_player < 0 { 10 } else { 1 };
-                self.opts_buffer.push((0, 1, priority));
-            }
-            if open_w && self.dx != 1 {
-                let priority = if dx_to_player > 0 { 10 } else { 1 };
-                self.opts_buffer.push((-1, 0, priority));
-            }
-            if open_e && self.dx != -1 {
-                let priority = if dx_to_player < 0 { 10 } else { 1 };
-                self.opts_buffer.push((1, 0, priority));
-            }
-
+            
             if self.opts_buffer.is_empty() {
                 self.dx = -self.dx;
                 self.dy = -self.dy;
                 return;
             }
             
-            // Choose direction with highest priority (fleeing), or random if equal
             self.opts_buffer.sort_by(|a, b| b.2.cmp(&a.2));
             let best_priority = self.opts_buffer[0].2;
-            let mut best_count = 0;
-            for opt in &self.opts_buffer {
-                if opt.2 == best_priority {
-                    best_count += 1;
-                } else {
-                    break;
-                }
-            }
-            let i = rng.range(0, best_count - 1) as usize;
+            let best_count = self.opts_buffer.iter()
+                .take_while(|opt| opt.2 == best_priority)
+                .count();
+            let i = rng.range(0, best_count as i32 - 1) as usize;
             let (dx, dy, _) = self.opts_buffer[i];
             self.dx = dx;
             self.dy = dy;
@@ -86,24 +70,10 @@ impl Ghost {
         }
         
         // Normal AI: choose a direction at junctions; avoid immediate reversal unless stuck
-        let open_n = !is_wall(self.x, self.y - 1);
-        let open_s = !is_wall(self.x, self.y + 1);
-        let open_w = !is_wall(self.x - 1, self.y);
-        let open_e = !is_wall(self.x + 1, self.y);
-
-        // Reuse buffer for normal AI
-        self.opts_buffer.clear();
-        if open_n && self.dy != 1 {
-            self.opts_buffer.push((0, -1, 0));
-        }
-        if open_s && self.dy != -1 {
-            self.opts_buffer.push((0, 1, 0));
-        }
-        if open_w && self.dx != 1 {
-            self.opts_buffer.push((-1, 0, 0));
-        }
-        if open_e && self.dx != -1 {
-            self.opts_buffer.push((1, 0, 0));
+        for (dx, dy) in DIRECTIONS.iter() {
+            if !is_wall(self.x + dx, self.y + dy) && (*dx, *dy) != (-self.dx, -self.dy) {
+                self.opts_buffer.push((*dx, *dy, 0));
+            }
         }
 
         if self.opts_buffer.is_empty() {
@@ -130,7 +100,7 @@ impl Ghost {
         if self.sub >= 5 {
             self.sub = 0;
             let mut nx = self.x + self.dx;
-            let mut ny = self.y + self.dy;
+            let ny = self.y + self.dy;
             if ny == TUNNEL_ROW && nx < 0 {
                 nx = GRID_W - 1;
             }

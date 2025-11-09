@@ -53,14 +53,14 @@ impl Game {
         self.frame = self.frame.wrapping_add(1);
 
         // Check current keyboard state for held keys (fallback)
-        if keyboard.is_scancode_pressed(Scancode::Up) {
-            self.process_input(0, -1);
-        } else if keyboard.is_scancode_pressed(Scancode::Down) {
-            self.process_input(0, 1);
-        } else if keyboard.is_scancode_pressed(Scancode::Left) {
-            self.process_input(-1, 0);
-        } else if keyboard.is_scancode_pressed(Scancode::Right) {
-            self.process_input(1, 0);
+        const DIRS: [(Scancode, (i32, i32)); 4] = [
+            (Scancode::Up, (0, -1)),
+            (Scancode::Down, (0, 1)),
+            (Scancode::Left, (-1, 0)),
+            (Scancode::Right, (1, 0)),
+        ];
+        if let Some((_, (dx, dy))) = DIRS.iter().find(|(sc, _)| keyboard.is_scancode_pressed(*sc)) {
+            self.process_input(*dx, *dy);
         }
 
         // Update player

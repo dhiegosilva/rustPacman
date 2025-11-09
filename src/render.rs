@@ -3,7 +3,6 @@
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use crate::constants::{GRID_W, GRID_H, TILE, VIEW_W, VIEW_H, SCORE_AREA, MAZE};
-use crate::maze::is_power_pellet;
 
 pub struct RenderCache {
     pub scale: f32,
@@ -50,72 +49,44 @@ pub fn draw_score(
     oy: i32,
     sw: i32,
 ) {
-    let score_str = format!("{:06}", score);
-    let char_w = 4;
-    let char_h = 6;
-    let spacing = 1;
-    let pixel_size = 2;
-    
-    // Simple block digits (0-9) - each digit is 4x6 pixels
-    let digits: [[[bool; 4]; 6]; 10] = [
-        // 0
-        [[true, true, true, true], [true, false, false, true], [true, false, false, true], 
-         [true, false, false, true], [true, false, false, true], [true, true, true, true]],
-        // 1
-        [[false, false, true, false], [false, true, true, false], [false, false, true, false], 
-         [false, false, true, false], [false, false, true, false], [false, true, true, true]],
-        // 2
-        [[true, true, true, true], [false, false, false, true], [true, true, true, true], 
-         [true, false, false, false], [true, false, false, false], [true, true, true, true]],
-        // 3
-        [[true, true, true, true], [false, false, false, true], [true, true, true, true], 
-         [false, false, false, true], [false, false, false, true], [true, true, true, true]],
-        // 4
-        [[true, false, false, true], [true, false, false, true], [true, true, true, true], 
-         [false, false, false, true], [false, false, false, true], [false, false, false, true]],
-        // 5
-        [[true, true, true, true], [true, false, false, false], [true, true, true, true], 
-         [false, false, false, true], [false, false, false, true], [true, true, true, true]],
-        // 6
-        [[true, true, true, true], [true, false, false, false], [true, true, true, true], 
-         [true, false, false, true], [true, false, false, true], [true, true, true, true]],
-        // 7
-        [[true, true, true, true], [false, false, false, true], [false, false, false, true], 
-         [false, false, false, true], [false, false, false, true], [false, false, false, true]],
-        // 8
-        [[true, true, true, true], [true, false, false, true], [true, true, true, true], 
-         [true, false, false, true], [true, false, false, true], [true, true, true, true]],
-        // 9
-        [[true, true, true, true], [true, false, false, true], [true, true, true, true], 
-         [false, false, false, true], [false, false, false, true], [true, true, true, true]],
+    // Compact bitmask: each digit is 4x6, stored as 6 u8s (one per row)
+    const DIGITS: [[u8; 6]; 10] = [
+        [0b1111, 0b1001, 0b1001, 0b1001, 0b1001, 0b1111], // 0
+        [0b0010, 0b0110, 0b0010, 0b0010, 0b0010, 0b0111], // 1
+        [0b1111, 0b0001, 0b1111, 0b1000, 0b1000, 0b1111], // 2
+        [0b1111, 0b0001, 0b1111, 0b0001, 0b0001, 0b1111], // 3
+        [0b1001, 0b1001, 0b1111, 0b0001, 0b0001, 0b0001], // 4
+        [0b1111, 0b1000, 0b1111, 0b0001, 0b0001, 0b1111], // 5
+        [0b1111, 0b1000, 0b1111, 0b1001, 0b1001, 0b1111], // 6
+        [0b1111, 0b0001, 0b0001, 0b0001, 0b0001, 0b0001], // 7
+        [0b1111, 0b1001, 0b1111, 0b1001, 0b1001, 0b1111], // 8
+        [0b1111, 0b1001, 0b1111, 0b0001, 0b0001, 0b1111], // 9
     ];
     
-    // Position score at top of score area, centered horizontally
+    let score_str = format!("{:06}", score);
+    let char_w = 4;
+    let spacing = 1;
+    let pixel_size = 2;
     let score_width = (score_str.len() as i32 * (char_w + spacing) * pixel_size) as i32;
     let mut x_pos = ox + (sw - score_width) / 2;
     let y_pos = oy + 5;
     
-    // Draw score digits
+    canvas.set_draw_color(Color::RGB(255, 255, 255));
     for ch in score_str.chars() {
-        if ch.is_ascii_digit() {
-            let digit = ch as usize - '0' as usize;
-            if digit < 10 {
-                for row in 0..char_h {
-                    for col in 0..char_w {
-                        if digits[digit][row as usize][col as usize] {
-                            let rx = x_pos + (col * pixel_size);
-                            let ry = y_pos + (row * pixel_size);
-                            canvas.set_draw_color(Color::RGB(255, 255, 255));
-                            let _ = canvas.fill_rect(Rect::new(
-                                rx, ry, 
-                                pixel_size as u32, 
-                                pixel_size as u32
-                            ));
-                        }
+        if let Some(digit) = ch.to_digit(10).and_then(|d| DIGITS.get(d as usize)) {
+            for (row, &bits) in digit.iter().enumerate() {
+                for col in 0..char_w {
+                    if (bits >> (char_w - 1 - col)) & 1 != 0 {
+                        let _ = canvas.fill_rect(Rect::new(
+                            x_pos + (col as i32 * pixel_size),
+                            y_pos + (row as i32 * pixel_size),
+                            pixel_size as u32,
+                            pixel_size as u32,
+                        ));
                     }
                 }
             }
-            x_pos += (char_w + spacing) as i32 * pixel_size;
+            x_pos += (char_w + spacing) * pixel_size;
         }
     }
 }
